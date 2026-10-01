@@ -16,14 +16,21 @@ const app = express();
     res.send('Backend HOLA funcionando 🚀');
   });
 
-app.post('/crear_cuenta', crear_cuenta);
-app.delete('/eliminar_cuenta/:nombre_usuario', eliminar_cuenta);
+//Publicaciones
+app.get('/publicaciones/:usuario_id', publicaciones);
 app.post('/crear_publicacion', crear_publicacion);
 app.delete('/eliminar_publicacion/:id', eliminar_publicacion);
 app.post('/guardar_publicacion', guardar_publicacion);
-app.patch('/vistas/:id', sumarVista);
 app.patch('/publicacion_vendida/:id', publi_vendida);
-app.get('/publicaciones/:usuario_id', publicaciones);
-app.get('/guardados/:usuario_id', guardados)
+app.patch('/editar_publicacion/:id', editar_publicacion);
+
+// Usuario / Cuenta
+app.post('/crear_cuenta', crear_cuenta);
+app.delete('/eliminar_cuenta/:nombre_usuario', eliminar_cuenta);
 app.patch('/usuario/:id', editar_usuario);
-app.patch('/publicacion/:id', editar_publicacion);
+
+// Vista
+app.patch('/vistas/:id', sumarVista);
+
+// Guardados
+app.get('/guardados/:usuario_id', guardados)
