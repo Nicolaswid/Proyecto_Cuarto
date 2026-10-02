@@ -1,4 +1,5 @@
 import pool from '../db.js';
+import bcrypt from 'bcrypt';
 
 const crear_cuenta = async (req, res) => {
   const {
@@ -9,9 +10,9 @@ const crear_cuenta = async (req, res) => {
   if (!nombre_usuario || !nombre || !apellido || !fecha_nacimiento || !email || !contrasena || !numero_telefono) {
     return res.status(400).json({ error: 'Faltan datos obligatorios' });
   }
-
+  const hashedcontrasena = await bcrypt.hash(contrasena, 10);
   const columnas = ['nombre_usuario', 'nombre', 'apellido', 'fecha_nacimiento', 'email', 'contrasena', 'numero_telefono'];
-  const valores = [nombre_usuario, nombre, apellido, fecha_nacimiento, email, contrasena, numero_telefono];
+  const valores = [nombre_usuario, nombre, apellido, fecha_nacimiento, email, hashedcontrasena, numero_telefono];
 
   if (instagram) {
     columnas.push('instagram');

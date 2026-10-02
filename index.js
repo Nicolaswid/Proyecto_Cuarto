@@ -4,6 +4,7 @@ import { crear_cuenta, eliminar_cuenta, editar_usuario } from "./Funciones/crea_
 import { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion } from './Funciones/publicaciones.js';
 import { guardar_publicacion, publi_vendida, guardados } from './Funciones/guardados.js';
 import { sumarVista } from './Funciones/vistas.js';
+import { login } from './funciones/log_in.js';
 const app = express();
   app.use(cors());
   app.use(express.json());
@@ -34,3 +35,6 @@ app.patch('/vistas/:id', sumarVista);
 
 // Guardados
 app.get('/guardados/:usuario_id', guardados)
+
+// Log In
+app.post('/login', login);
