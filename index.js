@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { crear_cuenta, eliminar_cuenta, editar_usuario } from "./Funciones/crea_elimina_usu.js";
+import { crear_cuenta, eliminar_cuenta, editar_usuario } from './Funciones/usuario.js';
 import { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion } from './Funciones/publicaciones.js';
 import { guardar_publicacion, publi_vendida, guardados } from './Funciones/guardados.js';
 import { sumarVista } from './Funciones/vistas.js';
