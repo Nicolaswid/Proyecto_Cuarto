@@ -4,7 +4,7 @@ import { crear_cuenta, eliminar_cuenta, editar_usuario } from './Funciones/usuar
 import { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion } from './Funciones/publicaciones.js';
 import { guardar_publicacion, publi_vendida, guardados } from './Funciones/guardados.js';
 import { sumarVista } from './Funciones/vistas.js';
-import { login } from './funciones/log_in.js';
+import { login } from './Funciones/log_in.js';
 import { mis_notificaciones, marcar_notificacion_leida } from './Funciones/notificaciones.js';
 import { crear_comentario, listar_comentarios } from './Funciones/comentarios.js';
 import { verificarToken } from './middleware/verificarToken.js';

@@ -8,7 +8,7 @@ const crear_comentario = async (req, res) => {
       typeof texto !== 'string' || texto.trim() === '') {
     return res.status(400).json({ error: 'Faltan datos obligatorios' });
   }
-
+  
   try {
     const publicacion = await pool.query(
       `SELECT titulo, usuario_publicador_id FROM producto WHERE id = $1`,
