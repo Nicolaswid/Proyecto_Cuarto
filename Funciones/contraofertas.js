@@ -38,7 +38,6 @@ const cerrar_ofertas_pendientes = async (client, producto_id, excluir_id, vended
 const crear_contraoferta = async (req, res) => {
   const { producto_id, nuevo_precio, comentario } = req.body;
 
-  // Validar primero (400). Number(null) y Number('') dan 0, y 0 no pasa el "> 0".
   if (!producto_id || !Number.isInteger(Number(producto_id)) ||
       !Number.isFinite(Number(nuevo_precio)) || Number(nuevo_precio) <= 0) {
     return res.status(400).json({ error: 'Faltan datos obligatorios o son inválidos' });

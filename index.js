@@ -7,6 +7,9 @@ import { sumarVista } from './Funciones/vistas.js';
 import { login } from './Funciones/log_in.js';
 import { mis_notificaciones, marcar_notificacion_leida } from './Funciones/notificaciones.js';
 import { crear_comentario, listar_comentarios } from './Funciones/comentarios.js';
+import { crear_contraoferta, responder_contraoferta, mis_contraofertas, comprar_ahora } from './Funciones/contraofertas.js';
+import { mis_ordenes, marcar_enviada, marcar_entregada } from './Funciones/ordenes.js';
+import { crear_resena_producto, crear_resena_vendedor, resenas_de_producto, resenas_de_vendedor } from './Funciones/resenas.js';
 import { verificarToken } from './middleware/verificarToken.js';
 const app = express();
   app.use(cors());
@@ -54,3 +57,20 @@ app.patch('/notificaciones/:id/leida', verificarToken, marcar_notificacion_leida
 //Comentarios
 app.post('/comentarios', verificarToken, crear_comentario);
 app.get('/publicaciones/:id/comentarios', listar_comentarios);
+
+//Contraofertas
+app.post('/contraofertas', verificarToken, crear_contraoferta);
+app.post('/contraofertas/:id/responder', verificarToken, responder_contraoferta);
+app.get('/mis_contraofertas', verificarToken, mis_contraofertas);
+app.post('/comprar_ahora', verificarToken, comprar_ahora);
+
+// Órdenes
+app.get('/mis_ordenes', verificarToken, mis_ordenes);
+app.patch('/ordenes/:id/enviada', verificarToken, marcar_enviada);
+app.patch('/ordenes/:id/entregada', verificarToken, marcar_entregada);
+
+// Reseñas
+app.post('/resenas_producto', verificarToken, crear_resena_producto);
+app.post('/resenas_vendedor', verificarToken, crear_resena_vendedor);
+app.get('/productos/:id/resenas', resenas_de_producto);
+app.get('/usuarios/:nombre_usuario/resenas', resenas_de_vendedor);
