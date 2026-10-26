@@ -120,4 +120,69 @@ const editar_usuario = async (req, res) => {
   }
 };
 
-export { crear_cuenta, eliminar_cuenta, editar_usuario};
+const estadisticas = async (usuario_id) => {
+  const resultado = await pool.query(
+    `SELECT
+       (SELECT COUNT(*)::int FROM producto
+        WHERE usuario_publicador_id = $1 AND estado_publicacion = 'disponible') AS publicaciones_disponibles,
+       (SELECT COUNT(*)::int FROM ordenes_de_compra
+        WHERE vendedor_id = $1 AND estado = 'entregada') AS ventas_entregadas,
+       (SELECT COUNT(*)::int FROM resenas_vendedor
+        WHERE vendedor_id = $1) AS relatos_recibidos`,
+    [usuario_id]
+  );
+  return resultado.rows[0];
+};
+
+// GET /usuarios/:nombre_usuario (público)
+const ver_perfil = async (req, res) => {
+  const { nombre_usuario } = req.params;
+
+  try {
+    // Columnas elegidas a mano: Ni email ni contrasena.
+    // Un usuario baneado se trata como inexistente.
+    const usuario = await pool.query(
+      `SELECT id, nombre_usuario, nombre, apellido, instagram, verificado, foto_perfil
+       FROM usuario
+       WHERE nombre_usuario = $1 AND estado <> 'ban'`,
+      [nombre_usuario]
+    );
+
+    if (usuario.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const datos = usuario.rows[0];
+    const stats = await estadisticas(datos.id);
+
+    // "..." junta los dos objetos en uno solo
+    res.status(200).json({ ...datos, ...stats });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al obtener el perfil' });
+  }
+};
+
+//  GET /mi_perfil (con token): lo mismo + datos privados
+const mi_perfil = async (req, res) => {
+  try {
+    const usuario = await pool.query(
+      `SELECT id, nombre_usuario, nombre, apellido, fecha_nacimiento, instagram,
+              verificado, estado, foto_perfil, numero_telefono
+       FROM usuario WHERE id = $1`,
+      [req.usuario.id]
+    );
+
+    if (usuario.rows.length === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+
+    const stats = await estadisticas(req.usuario.id);
+    res.status(200).json({ ...usuario.rows[0], ...stats });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al obtener el perfil' });
+  }
+};
+
+export { crear_cuenta, eliminar_cuenta, editar_usuario, ver_perfil, mi_perfil };

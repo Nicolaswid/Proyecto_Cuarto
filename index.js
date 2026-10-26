@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { crear_cuenta, eliminar_cuenta, editar_usuario } from './Funciones/usuario.js';
+import { crear_cuenta, eliminar_cuenta, editar_usuario, ver_perfil, mi_perfil  } from './Funciones/usuario.js';
 import { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion } from './Funciones/publicaciones.js';
 import { guardar_publicacion, publi_vendida, guardados } from './Funciones/guardados.js';
 import { sumarVista } from './Funciones/vistas.js';
@@ -10,6 +10,8 @@ import { crear_comentario, listar_comentarios } from './Funciones/comentarios.js
 import { crear_contraoferta, responder_contraoferta, mis_contraofertas, comprar_ahora } from './Funciones/contraofertas.js';
 import { mis_ordenes, marcar_enviada, marcar_entregada } from './Funciones/ordenes.js';
 import { crear_resena_producto, crear_resena_vendedor, resenas_de_producto, resenas_de_vendedor } from './Funciones/resenas.js';
+import { listar_productos } from './Funciones/feed.js';
+import { tokenOpcional } from './middleware/tokenOpcional.js';
 import { verificarToken } from './middleware/verificarToken.js';
 const app = express();
   app.use(cors());
@@ -35,6 +37,10 @@ app.patch('/editar_publicacion/:id', editar_publicacion);
 app.post('/crear_cuenta', crear_cuenta);
 app.delete('/eliminar_cuenta/:nombre_usuario', eliminar_cuenta);
 app.patch('/usuario/:id', editar_usuario);
+
+// Perfil
+app.get('/usuarios/:nombre_usuario', ver_perfil);
+app.get('/mi_perfil', verificarToken, mi_perfil);
 
 // Vista
 app.patch('/vistas/:id', sumarVista);
@@ -74,3 +80,6 @@ app.post('/resenas_producto', verificarToken, crear_resena_producto);
 app.post('/resenas_vendedor', verificarToken, crear_resena_vendedor);
 app.get('/productos/:id/resenas', resenas_de_producto);
 app.get('/usuarios/:nombre_usuario/resenas', resenas_de_vendedor);
+
+// Productos (el orden lo decide Python; el token es opcional)
+app.get('/productos', tokenOpcional, listar_productos);
