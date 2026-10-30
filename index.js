@@ -10,6 +10,7 @@ import { crear_comentario, listar_comentarios } from './Funciones/comentarios.js
 import { crear_contraoferta, responder_contraoferta, mis_contraofertas, comprar_ahora } from './Funciones/contraofertas.js';
 import { mis_ordenes, marcar_enviada, marcar_entregada } from './Funciones/ordenes.js';
 import { crear_resena_producto, crear_resena_vendedor, resenas_de_producto, resenas_de_vendedor } from './Funciones/resenas.js';
+import { crear_mensaje, ver_conversacion, marcar_leidos, mis_conversaciones } from './Funciones/mensajes.js';
 import { listar_productos } from './Funciones/feed.js';
 import { tokenOpcional } from './middleware/tokenOpcional.js';
 import { verificarToken } from './middleware/verificarToken.js';
@@ -26,17 +27,17 @@ const app = express();
   });
 
 //Publicaciones
-app.get('/publicaciones/:usuario_id', publicaciones);
-app.post('/crear_publicacion', crear_publicacion);
-app.delete('/eliminar_publicacion/:id', eliminar_publicacion);
-app.post('/guardar_publicacion', guardar_publicacion);
+app.get('/publicaciones/:usuario_id', verificarToken, publicaciones);
+app.post('/crear_publicacion', verificarToken, crear_publicacion);
+app.delete('/eliminar_publicacion/:id', verificarToken, eliminar_publicacion);
+app.post('/guardar_publicacion', verificarToken, guardar_publicacion);
 app.patch('/publicacion_vendida/:id', publi_vendida);
-app.patch('/editar_publicacion/:id', editar_publicacion);
+app.patch('/editar_publicacion/:id', verificarToken, editar_publicacion);
 
 // Usuario / Cuenta
 app.post('/crear_cuenta', crear_cuenta);
-app.delete('/eliminar_cuenta/:nombre_usuario', eliminar_cuenta);
-app.patch('/usuario/:id', editar_usuario);
+app.delete('/eliminar_cuenta/:nombre_usuario', verificarToken, eliminar_cuenta);
+app.patch('/usuario/:id', verificarToken, editar_usuario);
 
 // Perfil
 app.get('/usuarios/:nombre_usuario', ver_perfil);
@@ -46,7 +47,7 @@ app.get('/mi_perfil', verificarToken, mi_perfil);
 app.patch('/vistas/:id', sumarVista);
 
 // Guardados
-app.get('/guardados/:usuario_id', guardados)
+app.get('/guardados/:usuario_id', verificarToken, guardados)
 
 // Log In
 app.post('/login', login);
@@ -80,6 +81,12 @@ app.post('/resenas_producto', verificarToken, crear_resena_producto);
 app.post('/resenas_vendedor', verificarToken, crear_resena_vendedor);
 app.get('/productos/:id/resenas', resenas_de_producto);
 app.get('/usuarios/:nombre_usuario/resenas', resenas_de_vendedor);
+
+// Mensajes
+app.post('/mensajes', verificarToken, crear_mensaje);
+app.get('/mensajes/:otro_usuario_id', verificarToken, ver_conversacion);
+app.patch('/mensajes/:otro_usuario_id/leidos', verificarToken, marcar_leidos);
+app.get('/mis_conversaciones', verificarToken, mis_conversaciones);
 
 // Productos (el orden lo decide Python; el token es opcional)
 app.get('/productos', tokenOpcional, listar_productos);
