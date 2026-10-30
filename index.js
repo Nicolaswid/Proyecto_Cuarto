@@ -31,7 +31,7 @@ app.get('/publicaciones/:usuario_id', verificarToken, publicaciones);
 app.post('/crear_publicacion', verificarToken, crear_publicacion);
 app.delete('/eliminar_publicacion/:id', verificarToken, eliminar_publicacion);
 app.post('/guardar_publicacion', verificarToken, guardar_publicacion);
-app.patch('/publicacion_vendida/:id', publi_vendida);
+app.patch('/publicacion_vendida/:id', verificarToken, publi_vendida);
 app.patch('/editar_publicacion/:id', verificarToken, editar_publicacion);
 
 // Usuario / Cuenta
