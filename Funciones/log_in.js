@@ -19,13 +19,21 @@ const login = async (req, res) => {
     }
   
     const usuario = result.rows[0];
-  
     const ok = await bcrypt.compare(contrasena, usuario.contrasena);
   
     if (!ok) {
       return res.status(401).json({ error: "Usuario o contraseña incorrecta" });
     }
   
+// Recién ahora, con la contraseña correcta, revisamos el estado de la cuenta.
+    // (Si lo hiciéramos antes, cualquiera podría descubrir quién está baneado.)
+    if (usuario.estado === 'baneado') {
+      return res.status(403).json({ error: "Tu cuenta fue baneada" });
+    }
+    if (usuario.estado === 'suspendido') {
+      return res.status(403).json({ error: "Tu cuenta está suspendida por reportes de otros usuarios" });
+    }
+
     const token = jwt.sign(
       { id: usuario.id, nombre_usuario: usuario.nombre_usuario },
       process.env.JWT_SECRET,
@@ -33,6 +41,6 @@ const login = async (req, res) => {
     );
   
     res.json({ token });  
+    
   };
-
 export {login};

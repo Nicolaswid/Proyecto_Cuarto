@@ -189,4 +189,77 @@ const marcar_entregada = async (req, res) => {
   }
 };
 
-export { mis_ordenes, marcar_enviada, marcar_entregada };
+// Cancela la transacción y responde con un error (igual que en contraofertas.js)
+const cortar = async (client, res, status, mensaje) => {
+  await client.query('ROLLBACK');
+  return res.status(status).json({ error: mensaje });
+};
+
+// ---------- PATCH /ordenes/:id/cancelar : comprador O vendedor ----------
+const cancelar_orden = async (req, res) => {
+  const { id } = req.params;
+
+  if (!Number.isInteger(Number(id))) {
+    return res.status(400).json({ error: 'Id inválido' });
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // FOR UPDATE OF o: bloquea la fila de la orden mientras decidimos
+    const orden = await client.query(
+      `SELECT o.id, o.producto_id, o.comprador_id, o.vendedor_id, o.estado, p.titulo
+       FROM ordenes_de_compra o
+       JOIN producto p ON p.id = o.producto_id
+       WHERE o.id = $1
+       FOR UPDATE OF o`,
+      [id]
+    );
+    if (orden.rows.length === 0) {
+      return await cortar(client, res, 404, 'Orden no encontrada');
+    }
+
+    const { producto_id, comprador_id, vendedor_id, estado, titulo } = orden.rows[0];
+
+    // Ajeno a la orden: 404
+    if (req.usuario.id !== comprador_id && req.usuario.id !== vendedor_id) {
+      return await cortar(client, res, 404, 'Orden no encontrada');
+    }
+    if (!['confirmada', 'enviada'].includes(estado)) {
+      return await cortar(client, res, 400, `La orden está '${estado}', no se puede cancelar`);
+    }
+
+    // Dos cambios juntos: la orden se cancela Y el producto vuelve a estar disponible
+    const cancelada = await client.query(
+      `UPDATE ordenes_de_compra SET estado = 'cancelada' WHERE id = $1
+       RETURNING id, producto_id, comprador_id, vendedor_id, precio_final, estado, fecha`,
+      [id]
+    );
+    await client.query(
+      `UPDATE producto SET estado_publicacion = 'disponible' WHERE id = $1`,
+      [producto_id]
+    );
+
+    await client.query('COMMIT');
+
+    // Se avisa a la OTRA parte, recién después del COMMIT
+    const otro_id = req.usuario.id === vendedor_id ? comprador_id : vendedor_id;
+    await crear_notificacion(
+      otro_id,
+      `${req.usuario.nombre_usuario} canceló la orden de "${titulo}"`,
+      '/mis_ordenes'
+    );
+
+    res.status(200).json(cancelada.rows[0]);
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error(error);
+    res.status(500).json({ error: 'Error al cancelar la orden' });
+  } finally {
+    if (client) client.release();
+  }
+};
+
+export { mis_ordenes, marcar_enviada, marcar_entregada, cancelar_orden };

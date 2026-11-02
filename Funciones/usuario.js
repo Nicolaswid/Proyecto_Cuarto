@@ -29,7 +29,8 @@ const crear_cuenta = async (req, res) => {
 
   try {
     const resultado = await pool.query(
-      `INSERT INTO usuario (${columnas.join(', ')}) VALUES (${huecos}) RETURNING *`,
+      `INSERT INTO usuario (${columnas.join(', ')}) VALUES (${huecos})
+      RETURNING id, nombre_usuario, nombre, apellido, instagram, verificado, foto_perfil`,
       valores
     );
     res.status(201).json(resultado.rows[0]);
@@ -46,17 +47,22 @@ const eliminar_cuenta = async (req, res) => {
   const { nombre_usuario } = req.params;
 
   try {
+    // El id sale del token y el nombre de la URL
     const resultado = await pool.query(
-      `DELETE FROM usuario WHERE nombre_usuario = $1 RETURNING *`,
-      [nombre_usuario]
+      `DELETE FROM usuario WHERE id = $1 AND nombre_usuario = $2 RETURNING id`,
+      [req.usuario.id, nombre_usuario]
     );
 
     if (resultado.rows.length === 0) {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    res.status(200).json({ mensaje: 'Usuario eliminado', usuario: resultado.rows[0] });
+    res.status(200).json({ mensaje: 'Usuario eliminado' });
   } catch (error) {
+    // 23503 = foreign key (ON DELETE RESTRICT): tiene órdenes u otros datos asociados
+    if (error.code === '23503') {
+      return res.status(400).json({ error: 'No se puede eliminar la cuenta porque tiene órdenes u otras operaciones asociadas' });
+    }
     console.error(error);
     res.status(500).json({ error: 'Error al eliminar usuario' });
   }
@@ -69,7 +75,10 @@ const editar_usuario = async (req, res) => {
   if (!id || isNaN(id)) {
     return res.status(400).json({ error: 'Falta el id de usuario o no es válido' });
   }
-
+  // Solo podés editar tu propio perfil. Si es de otro: 404 (no se revela que existe)
+  if (Number(id) !== req.usuario.id) {
+    return res.status(404).json({ error: 'Usuario no encontrado' });
+  }
   const campos = [];
   const valores = [];
 
@@ -102,7 +111,7 @@ const editar_usuario = async (req, res) => {
 
   try {
     const resultado = await pool.query(
-      `UPDATE usuario SET ${set} WHERE id = $${valores.length} RETURNING *`,
+      `UPDATE usuario SET ${set} WHERE id = $${valores.length} RETURNING id, nombre_usuario, nombre, apellido, instagram, verificado, foto_perfil, numero_telefono`,
       valores
     );
 

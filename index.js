@@ -2,15 +2,16 @@ import express from 'express';
 import cors from 'cors';
 import { crear_cuenta, eliminar_cuenta, editar_usuario, ver_perfil, mi_perfil  } from './Funciones/usuario.js';
 import { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion } from './Funciones/publicaciones.js';
-import { guardar_publicacion, publi_vendida, guardados } from './Funciones/guardados.js';
+import { guardar_publicacion, guardados, sacar_guardado } from './Funciones/guardados.js';
 import { sumarVista } from './Funciones/vistas.js';
 import { login } from './Funciones/log_in.js';
 import { mis_notificaciones, marcar_notificacion_leida } from './Funciones/notificaciones.js';
 import { crear_comentario, listar_comentarios } from './Funciones/comentarios.js';
-import { crear_contraoferta, responder_contraoferta, mis_contraofertas, comprar_ahora } from './Funciones/contraofertas.js';
-import { mis_ordenes, marcar_enviada, marcar_entregada } from './Funciones/ordenes.js';
+import { crear_contraoferta, responder_contraoferta, mis_contraofertas, comprar_ahora } from './Funciones/ofertas.js';
+import { mis_ordenes, marcar_enviada, marcar_entregada, cancelar_orden } from './Funciones/ordenes.js';
 import { crear_resena_producto, crear_resena_vendedor, resenas_de_producto, resenas_de_vendedor } from './Funciones/resenas.js';
 import { crear_mensaje, ver_conversacion, marcar_leidos, mis_conversaciones } from './Funciones/mensajes.js';
+import { reportar_usuario } from './Funciones/reportes.js';
 import { listar_productos } from './Funciones/feed.js';
 import { tokenOpcional } from './middleware/tokenOpcional.js';
 import { verificarToken } from './middleware/verificarToken.js';
@@ -27,11 +28,10 @@ const app = express();
   });
 
 //Publicaciones
-app.get('/publicaciones/:usuario_id', verificarToken, publicaciones);
+app.get('/publicaciones/:usuario_id', tokenOpcional, publicaciones); // Sirve tanto para si quiero mis publicaciones, como si quiero las publicaciones de otro
 app.post('/crear_publicacion', verificarToken, crear_publicacion);
 app.delete('/eliminar_publicacion/:id', verificarToken, eliminar_publicacion);
 app.post('/guardar_publicacion', verificarToken, guardar_publicacion);
-app.patch('/publicacion_vendida/:id', verificarToken, publi_vendida);
 app.patch('/editar_publicacion/:id', verificarToken, editar_publicacion);
 
 // Usuario / Cuenta
@@ -47,7 +47,9 @@ app.get('/mi_perfil', verificarToken, mi_perfil);
 app.patch('/vistas/:id', sumarVista);
 
 // Guardados
-app.get('/guardados/:usuario_id', verificarToken, guardados)
+app.get('/guardados/:usuario_id', verificarToken, guardados);
+app.post('/guardar_publicacion', verificarToken, guardar_publicacion);
+app.delete('/guardar_publicacion/:publicacion_id', verificarToken, sacar_guardado);
 
 // Log In
 app.post('/login', login);
@@ -75,6 +77,7 @@ app.post('/comprar_ahora', verificarToken, comprar_ahora);
 app.get('/mis_ordenes', verificarToken, mis_ordenes);
 app.patch('/ordenes/:id/enviada', verificarToken, marcar_enviada);
 app.patch('/ordenes/:id/entregada', verificarToken, marcar_entregada);
+app.patch('/ordenes/:id/cancelar', verificarToken, cancelar_orden);
 
 // Reseñas
 app.post('/resenas_producto', verificarToken, crear_resena_producto);
@@ -87,6 +90,9 @@ app.post('/mensajes', verificarToken, crear_mensaje);
 app.get('/mensajes/:otro_usuario_id', verificarToken, ver_conversacion);
 app.patch('/mensajes/:otro_usuario_id/leidos', verificarToken, marcar_leidos);
 app.get('/mis_conversaciones', verificarToken, mis_conversaciones);
+
+// Reportes
+app.post('/reportar', verificarToken, reportar_usuario);
 
 // Productos (el orden lo decide Python; el token es opcional)
 app.get('/productos', tokenOpcional, listar_productos);

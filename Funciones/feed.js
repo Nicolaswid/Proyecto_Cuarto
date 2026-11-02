@@ -82,14 +82,15 @@ const listar_productos = async (req, res) => {
         for (const id of orden) {
           const resultado = await pool.query(
             `SELECT p.id, p.titulo, p.descripcion, p.precio::float AS precio, p.talle, p.color,
-                    p.marca, p.estado_condicion, p.foto, p.visualizaciones,
-                    p.cantidad_guardados, p.fecha_publicacion,
-                    p.usuario_publicador_id,
-                    u.nombre_usuario AS vendedor_nombre_usuario,
-                    u.verificado AS vendedor_verificado
-             FROM producto p
-             JOIN usuario u ON u.id = p.usuario_publicador_id
-             WHERE p.id = $1`,
+            p.marca, p.tipo_prenda, p.subtipo_prenda, p.genero, p.stock,
+            p.estado_condicion, p.foto, p.visualizaciones,
+            p.cantidad_guardados, p.fecha_publicacion,
+            p.usuario_publicador_id,
+            u.nombre_usuario AS vendedor_nombre_usuario,
+            u.verificado AS vendedor_verificado
+     FROM producto p
+     JOIN usuario u ON u.id = p.usuario_publicador_id
+     WHERE p.id = $1`,
             [id]
           );
     
