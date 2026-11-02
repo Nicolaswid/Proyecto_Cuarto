@@ -237,8 +237,10 @@ const cancelar_orden = async (req, res) => {
        RETURNING id, producto_id, comprador_id, vendedor_id, precio_final, estado, fecha`,
       [id]
     );
+
+    // Devuelve la unidad al stock y la publicación vuelve a estar disponible
     await client.query(
-      `UPDATE producto SET estado_publicacion = 'disponible' WHERE id = $1`,
+      `UPDATE producto SET stock = stock + 1, estado_publicacion = 'disponible' WHERE id = $1`,
       [producto_id]
     );
 

@@ -10,6 +10,20 @@ const cortar = async (client, res, status, mensaje) => {
   return res.status(status).json({ error: mensaje });
 };
 
+// Descuenta 1 unidad del producto. Si era la última, lo marca 'vendido'.
+// Devuelve true si el producto quedó agotado.
+const descontar_stock = async (client, producto_id) => {
+  const resultado = await client.query(
+    `UPDATE producto
+     SET stock = stock - 1,
+         estado_publicacion = CASE WHEN stock <= 1 THEN 'vendido' ELSE estado_publicacion END
+     WHERE id = $1
+     RETURNING estado_publicacion`,
+    [producto_id]
+  );
+  return resultado.rows[0].estado_publicacion === 'vendido';
+};
+
 // Rechaza todas las ofertas 'pendiente' de un producto (menos la indicada)
 // y devuelve un Set con los ids de usuarios a los que hay que avisar.
 // Un Set es una lista que no permite repetidos.
@@ -184,10 +198,9 @@ const responder_contraoferta = async (req, res) => {
     let respuesta;
 
     if (accion === 'aceptar') {
-      await client.query(
-        `UPDATE contra_ofertas SET estado = 'aceptada' WHERE id = $1`,
-        [oferta.id]
-      );
+      
+      const quedo_vendido = await descontar_stock(client, producto.id);
+
       await client.query(
         `UPDATE producto SET estado_publicacion = 'vendido' WHERE id = $1`,
         [producto.id]
@@ -198,7 +211,11 @@ const responder_contraoferta = async (req, res) => {
          RETURNING id, producto_id, comprador_id, vendedor_id, precio_final, estado, fecha`,
         [producto.id, comprador_id, vendedor_id, oferta.nuevo_precio]
       );
-      const cerradas = await cerrar_ofertas_pendientes(client, producto.id, oferta.id, vendedor_id);
+        
+      // Solo si se agotó el stock se cierran las demás ofertas pendientes
+        const cerradas = quedo_vendido
+        ? await cerrar_ofertas_pendientes(client, producto.id, oferta.id, vendedor_id)
+        : new Set();
 
       notificaciones.push([
         oferta.usuario_id,
@@ -334,12 +351,12 @@ const comprar_ahora = async (req, res) => {
        RETURNING id, producto_id, comprador_id, vendedor_id, precio_final, estado, fecha`,
       [producto.id, req.usuario.id, vendedor_id, producto.precio]
     );
-    await client.query(
-      `UPDATE producto SET estado_publicacion = 'vendido' WHERE id = $1`,
-      [producto.id]
-    );
+    
+    const quedo_vendido = await descontar_stock(client, producto.id);
     // excluir_id = 0: no existe ninguna oferta con id 0, así que se cierran todas
-    const cerradas = await cerrar_ofertas_pendientes(client, producto.id, 0, vendedor_id);
+    const cerradas = quedo_vendido
+      ? await cerrar_ofertas_pendientes(client, producto.id, 0, vendedor_id)
+      : new Set();
 
     await client.query('COMMIT');
 

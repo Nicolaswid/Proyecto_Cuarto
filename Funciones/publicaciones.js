@@ -9,22 +9,30 @@ const crear_publicacion = async (req, res) => {
   } = req.body;
 
   if (!talle || !color || !estado_condicion || !precio || !titulo || !descripcion ||
-      !foto || !marca || !tipo_prenda || !subtipo_prenda || !genero) {
+      !foto || !marca || typeof tipo_prenda !== 'string' || tipo_prenda.trim() === '') {
     return res.status(400).json({ error: 'Faltan datos obligatorios' });
   }
   if (!Number.isFinite(Number(precio)) || Number(precio) <= 0) {
     return res.status(400).json({ error: 'El precio debe ser un número mayor a 0' });
   }
 
-  // stock es opcional: si no viene, vale 1 (igual que el DEFAULT de la base)
-  const stock_final = stock === undefined ? 1 : Number(stock);
-  if (!Number.isInteger(stock_final) || stock_final < 1) {
-    return res.status(400).json({ error: 'El stock debe ser un número entero de 1 o más' });
+  // Opcionales: si no vienen o están vacíos, se guarda null
+  const tipo_limpio = tipo_prenda.trim();
+  const subtipo_limpio =
+    typeof subtipo_prenda === 'string' && subtipo_prenda.trim() !== '' ? subtipo_prenda.trim() : null;
+  const genero_limpio =
+    typeof genero === 'string' && genero.trim() !== '' ? genero.trim() : null;
+
+  // Largos máximos de las columnas VARCHAR (si no, la base falla con un 500)
+  if (tipo_limpio.length > 50 || (subtipo_limpio && subtipo_limpio.length > 50) ||
+      (genero_limpio && genero_limpio.length > 30)) {
+    return res.status(400).json({ error: 'tipo_prenda y subtipo_prenda admiten hasta 50 caracteres, y genero hasta 30' });
   }
 
-  // Largos máximos de las columnas VARCHAR
-  if (String(tipo_prenda).length > 50 || String(subtipo_prenda).length > 50 || String(genero).length > 30) {
-    return res.status(400).json({ error: 'tipo_prenda y subtipo_prenda admiten hasta 50 caracteres, y genero hasta 30' });
+  // stock opcional: si no viene, vale 1
+  const stock_final = stock === undefined || stock === null ? 1 : Number(stock);
+  if (!Number.isInteger(stock_final) || stock_final < 1) {
+    return res.status(400).json({ error: 'El stock debe ser un número entero de 1 o más' });
   }
 
   try {
@@ -36,7 +44,7 @@ const crear_publicacion = async (req, res) => {
                  visualizaciones, foto, marca, tipo_prenda, subtipo_prenda, genero, stock,
                  estado_publicacion, fecha_publicacion, usuario_publicador_id, cantidad_guardados`,
       [talle, color, estado_condicion, Number(precio), titulo, descripcion, foto, marca,
-       tipo_prenda, subtipo_prenda, genero, stock_final, req.usuario.id]
+       tipo_limpio, subtipo_limpio, genero_limpio, stock_final, req.usuario.id]
     );
     res.status(201).json(resultado.rows[0]);
   } catch (error) {
@@ -102,7 +110,7 @@ const publicaciones = async (req, res) => {
   }
 };
 
-//  PATCH /editar_publicacion/:id (solo el dueño) 
+// ---------- PATCH /editar_publicacion/:id (solo el dueño) ----------
 const editar_publicacion = async (req, res) => {
   const { id } = req.params;
   const {
@@ -118,16 +126,22 @@ const editar_publicacion = async (req, res) => {
     talle, color, estado_condicion, precio, titulo, descripcion, foto, marca,
     tipo_prenda, subtipo_prenda, genero, stock
   };
+  const opcionales = ['subtipo_prenda', 'genero']; // estos se pueden dejar vacíos
   const campos = [];
   const valores = [];
 
   for (const nombreCampo in posibles) {
-    const valor = posibles[nombreCampo];
+    let valor = posibles[nombreCampo];
     if (valor === undefined) continue; // no lo mandaron: no se toca
 
-    // Mandarlo vacío o null no vale
-    if (valor === null || (typeof valor === 'string' && valor.trim() === '')) {
-      return res.status(400).json({ error: `El campo ${nombreCampo} no puede estar vacío` });
+    if (typeof valor === 'string') valor = valor.trim();
+
+    const vacio = valor === null || valor === '';
+    if (vacio) {
+      if (!opcionales.includes(nombreCampo)) {
+        return res.status(400).json({ error: `El campo ${nombreCampo} no puede estar vacío` });
+      }
+      valor = null; // los opcionales se pueden borrar
     }
     campos.push(nombreCampo);
     valores.push(valor);
@@ -142,13 +156,16 @@ const editar_publicacion = async (req, res) => {
   if (stock !== undefined && (!Number.isInteger(Number(stock)) || Number(stock) < 1)) {
     return res.status(400).json({ error: 'El stock debe ser un número entero de 1 o más' });
   }
-  if ((tipo_prenda !== undefined && String(tipo_prenda).length > 50) ||
-      (subtipo_prenda !== undefined && String(subtipo_prenda).length > 50) ||
-      (genero !== undefined && String(genero).length > 30)) {
+  if ((tipo_prenda && String(tipo_prenda).length > 50) ||
+      (subtipo_prenda && String(subtipo_prenda).length > 50) ||
+      (genero && String(genero).length > 30)) {
     return res.status(400).json({ error: 'tipo_prenda y subtipo_prenda admiten hasta 50 caracteres, y genero hasta 30' });
   }
 
   const set = campos.map((campo, i) => `${campo} = $${i + 1}`).join(', ');
+
+  // Si cambian el stock, la publicación vuelve a estar disponible (texto fijo, no viene del usuario)
+  const reactivar = stock !== undefined ? ", estado_publicacion = 'disponible'" : '';
 
   // Al final van el id de la publicación y el id del dueño (sale del token)
   valores.push(id);
@@ -156,7 +173,7 @@ const editar_publicacion = async (req, res) => {
 
   try {
     const resultado = await pool.query(
-      `UPDATE producto SET ${set}, fecha_publicacion = NOW()
+      `UPDATE producto SET ${set}${reactivar}, fecha_publicacion = NOW()
        WHERE id = $${valores.length - 1} AND usuario_publicador_id = $${valores.length}
        RETURNING id, talle, color, estado_condicion, precio::float AS precio, titulo, descripcion,
                  visualizaciones, foto, marca, tipo_prenda, subtipo_prenda, genero, stock,
