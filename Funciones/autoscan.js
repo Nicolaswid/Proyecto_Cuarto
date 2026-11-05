@@ -15,9 +15,12 @@ const url_valida = (valor) => {
 
   if (url.protocol !== 'https:') return false;
 
-  // Se lee DENTRO de la función (como JWT_SECRET). Si está vacío, no se restringe.
   const host_permitido = process.env.IMAGENES_HOST_PERMITIDO;
-  if (host_permitido && url.hostname !== host_permitido) return false;
+  if (host_permitido) {
+    if (url.hostname !== host_permitido) return false;
+    // Solo archivos públicos del Storage de Supabase
+    if (!url.pathname.startsWith('/storage/v1/object/public/')) return false;
+  }
 
   return true;
 };
@@ -35,7 +38,7 @@ const analizar_prenda = async (req, res) => {
   }
 
   try {
-    const url = process.env.PYTHON_PRENDA_URL || 'http://127.0.0.1:5000/analizar_prenda';
+    const url = process.env.PYTHON_URL_AUTOSCAN;
 
     // 2) Mandarle las imágenes a Python, con la clave compartida
     const respuesta = await fetch(url, {

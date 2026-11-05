@@ -14,10 +14,39 @@ import { crear_mensaje, ver_conversacion, marcar_leidos, mis_conversaciones } fr
 import { reportar_usuario } from './Funciones/reportes.js';
 import { listar_productos } from './Funciones/feed.js';
 import { analizar_prenda } from './Funciones/autoscan.js';
+import { verificarFirma, enviarAIA } from "./Funciones/whatsapp.js";
 import { tokenOpcional } from './middleware/tokenOpcional.js';
 import { verificarToken } from './middleware/verificarToken.js';
 const app = express();
   app.use(cors());
+  app.get("/webhooks", (req, res) => {
+    const token = req.query["hub.verify_token"];
+    if (token && token === process.env.VERIFY_TOKEN) {
+      return res.status(200).send(req.query["hub.challenge"]);
+    }
+    return res.status(400).send("Invalid token");
+  });
+  
+  // Recepción de mensajes
+  app.post("/webhooks", express.raw({ type: "*/*", limit: "5mb" }), (req, res) => {
+    const rawBody = req.body; // Buffer
+    const signature = req.headers["x-hub-signature-256"] ?? "";
+  
+    if (!Buffer.isBuffer(rawBody) || !verificarFirma(rawBody, signature, process.env.APP_SECRET)) {
+      return res.status(400).send("Firma inválida");
+    }
+  
+    let data;
+    try {
+      data = JSON.parse(rawBody.toString("utf8"));
+    } catch {
+      return res.status(400).send("JSON inválido");
+    }
+  
+    // Respondemos rápido a Meta (si tarda, reintenta) y reenviamos a la IA en segundo plano
+    res.status(200).send("Mensaje recibido");
+    enviarAIA(data);
+  });
   app.use(express.json());
 
   app.listen(process.env.PORT ?? 3000, () => {
