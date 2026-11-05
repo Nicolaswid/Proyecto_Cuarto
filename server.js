@@ -13,6 +13,7 @@ import { crear_resena_producto, crear_resena_vendedor, resenas_de_producto, rese
 import { crear_mensaje, ver_conversacion, marcar_leidos, mis_conversaciones } from './Funciones/mensajes.js';
 import { reportar_usuario } from './Funciones/reportes.js';
 import { listar_productos } from './Funciones/feed.js';
+import { analizar_prenda } from './Funciones/autoscan.js';
 import { tokenOpcional } from './middleware/tokenOpcional.js';
 import { verificarToken } from './middleware/verificarToken.js';
 const app = express();
@@ -97,6 +98,8 @@ app.post('/reportar', verificarToken, reportar_usuario);
 // Productos (el orden lo decide Python; el token es opcional)
 app.get('/productos', tokenOpcional, listar_productos);
 
+//Autoscan
+app.post('/analizar_prenda', verificarToken, analizar_prenda);
 
 app.get("/health",(req,res)=>{res.send("ok")})
 
