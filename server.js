@@ -19,7 +19,7 @@ const app = express();
   app.use(cors());
   app.use(express.json());
 
-  app.listen(3000, () => {
+  app.listen(process.env.PORT ?? 3000, () => {
     console.log('Servidor corriendo en el puerto 3000');
   });
 
@@ -96,3 +96,8 @@ app.post('/reportar', verificarToken, reportar_usuario);
 
 // Productos (el orden lo decide Python; el token es opcional)
 app.get('/productos', tokenOpcional, listar_productos);
+
+
+app.get("/health",(req,res)=>{res.send("ok")})
+
+app.get("/",(req,res)=>{res.send("ok")})
