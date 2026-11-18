@@ -217,11 +217,20 @@ const responder_contraoferta = async (req, res) => {
         ? await cerrar_ofertas_pendientes(client, producto.id, oferta.id, vendedor_id)
         : new Set();
 
-      notificaciones.push([
-        oferta.usuario_id,
-        `${nombre} aceptó tu oferta por "${producto.titulo}". Se generó la orden de compra`,
-        '/mis_ordenes'
-      ]);
+        // Al comprador siempre se le avisa que su orden se confirmó
+        notificaciones.push([
+            comprador_id,
+            `Tu orden de compra de "${producto.titulo}" fue confirmada`,
+            '/mis_ordenes'
+          ]);
+          // Si la oferta aceptada era del vendedor (una contraoferta), a él también hay que avisarle
+          if (oferta.usuario_id !== comprador_id) {
+            notificaciones.push([
+            oferta.usuario_id,
+            `${nombre} aceptó tu contraoferta por "${producto.titulo}". Se generó la orden de compra`,
+            '/mis_ordenes'
+          ]);
+          }
       // A los demás con ofertas abiertas les avisamos que se vendió (sin repetir a las partes)
       cerradas.delete(comprador_id);
       cerradas.delete(vendedor_id);
@@ -363,6 +372,11 @@ const comprar_ahora = async (req, res) => {
     await crear_notificacion(
       vendedor_id,
       `${req.usuario.nombre_usuario} compró "${producto.titulo}" por $${producto.precio}`,
+      '/mis_ordenes'
+    );
+    await crear_notificacion(
+      req.usuario.id,
+      `Tu orden de compra de "${producto.titulo}" fue confirmada`,
       '/mis_ordenes'
     );
     cerradas.delete(req.usuario.id); // el comprador ya sabe que compró
