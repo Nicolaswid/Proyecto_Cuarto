@@ -1,68 +1,38 @@
 import express from 'express';
 import cors from 'cors';
-import { crear_cuenta, eliminar_cuenta, editar_usuario, ver_perfil, mi_perfil  } from './Funciones/usuario.js';
-import { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion } from './Funciones/publicaciones.js';
+import { crear_cuenta, eliminar_cuenta, editar_usuario, ver_perfil, mi_perfil } from './Funciones/usuario.js';
+import { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion, datos_pago } from './Funciones/publicaciones.js';
 import { guardar_publicacion, guardados, sacar_guardado } from './Funciones/guardados.js';
 import { sumarVista } from './Funciones/vistas.js';
 import { login } from './Funciones/log_in.js';
 import { mis_notificaciones, marcar_notificacion_leida } from './Funciones/notificaciones.js';
 import { crear_comentario, listar_comentarios } from './Funciones/comentarios.js';
-import { crear_contraoferta, responder_contraoferta, mis_contraofertas, comprar_ahora } from './Funciones/ofertas.js';
+import { crear_contraoferta, responder_contraoferta, pagar_contraoferta, mis_contraofertas, comprar_ahora } from './Funciones/ofertas.js';
 import { mis_ordenes, marcar_enviada, marcar_entregada, cancelar_orden } from './Funciones/ordenes.js';
 import { crear_resena_producto, crear_resena_vendedor, resenas_de_producto, resenas_de_vendedor } from './Funciones/resenas.js';
 import { crear_mensaje, ver_conversacion, marcar_leidos, mis_conversaciones } from './Funciones/mensajes.js';
 import { reportar_usuario } from './Funciones/reportes.js';
 import { listar_productos } from './Funciones/feed.js';
 import { analizar_prenda } from './Funciones/autoscan.js';
-import { verificarFirma, enviarAIA } from "./Funciones/whatsapp.js";
 import { tokenOpcional } from './middleware/tokenOpcional.js';
 import { verificarToken } from './middleware/verificarToken.js';
+
 const app = express();
-  app.use(cors());
-  app.get("/webhooks", (req, res) => {
-    const token = req.query["hub.verify_token"];
-    if (token && token === process.env.VERIFY_TOKEN) {
-      return res.status(200).send(req.query["hub.challenge"]);
-    }
-    return res.status(400).send("Invalid token");
-  });
-  
-  // Recepción de mensajes
-  app.post("/webhooks", express.raw({ type: "*/*", limit: "5mb" }), (req, res) => {
-    const rawBody = req.body; // Buffer
-    const signature = req.headers["x-hub-signature-256"] ?? "";
-  
-    if (!Buffer.isBuffer(rawBody) || !verificarFirma(rawBody, signature, process.env.APP_SECRET)) {
-      return res.status(400).send("Firma inválida");
-    }
-  
-    let data;
-    try {
-      data = JSON.parse(rawBody.toString("utf8"));
-    } catch {
-      return res.status(400).send("JSON inválido");
-    }
-  
-    // Respondemos rápido a Meta (si tarda, reintenta) y reenviamos a la IA en segundo plano
-    res.status(200).send("Mensaje recibido");
-    enviarAIA(data);
-  });
-  app.use(express.json());
+app.use(cors());
+app.use(express.json());
 
-  app.listen(process.env.PORT ?? 3000, () => {
-    console.log('Servidor corriendo en el puerto 3000');
-  });
+app.get('/holita', (req, res) => {
+  res.send('Backend HOLA funcionando 🚀');
+});
+app.get('/health', (req, res) => { res.send('ok'); });
+app.get('/', (req, res) => { res.send('ok'); });
 
-  app.get('/holita', (req, res) => {
-    res.send('Backend HOLA funcionando 🚀');
-  });
-
-//Publicaciones
-app.get('/publicaciones/:usuario_id', tokenOpcional, publicaciones); // Sirve tanto para si quiero mis publicaciones, como si quiero las publicaciones de otro
+// Publicaciones
+app.get('/publicaciones/:usuario_id', tokenOpcional, publicaciones);
 app.post('/crear_publicacion', verificarToken, crear_publicacion);
 app.delete('/eliminar_publicacion/:id', verificarToken, eliminar_publicacion);
-app.post('/guardar_publicacion', verificarToken, guardar_publicacion);
 app.patch('/editar_publicacion/:id', verificarToken, editar_publicacion);
+app.get('/productos/:id/datos_pago', verificarToken, datos_pago);
 
 // Usuario / Cuenta
 app.post('/crear_cuenta', crear_cuenta);
@@ -84,22 +54,18 @@ app.delete('/guardar_publicacion/:publicacion_id', verificarToken, sacar_guardad
 // Log In
 app.post('/login', login);
 
-//Prueba Token
-app.get('/yo', verificarToken, (req, res) => {
-  res.json({ mensaje: 'Pasaste el portero', usuario: req.usuario });
-});
-
-//Notificacioness
+// Notificaciones
 app.get('/mis_notificaciones', verificarToken, mis_notificaciones);
 app.patch('/notificaciones/:id/leida', verificarToken, marcar_notificacion_leida);
 
-//Comentarios
+// Comentarios
 app.post('/comentarios', verificarToken, crear_comentario);
 app.get('/publicaciones/:id/comentarios', listar_comentarios);
 
-//Contraofertas
+// Contraofertas
 app.post('/contraofertas', verificarToken, crear_contraoferta);
 app.post('/contraofertas/:id/responder', verificarToken, responder_contraoferta);
+app.post('/contraofertas/:id/pagar', verificarToken, pagar_contraoferta);
 app.get('/mis_contraofertas', verificarToken, mis_contraofertas);
 app.post('/comprar_ahora', verificarToken, comprar_ahora);
 
@@ -127,9 +93,11 @@ app.post('/reportar', verificarToken, reportar_usuario);
 // Productos (el orden lo decide Python; el token es opcional)
 app.get('/productos', tokenOpcional, listar_productos);
 
-//Autoscan
+// Autoscan
 app.post('/analizar_prenda', verificarToken, analizar_prenda);
 
-app.get("/health",(req,res)=>{res.send("ok")})
-
-app.get("/",(req,res)=>{res.send("ok")})
+// SIEMPRE la última línea
+const puerto = process.env.PORT ?? 3000;
+app.listen(puerto, () => {
+  console.log(`Servidor corriendo en el puerto ${puerto}`);
+});

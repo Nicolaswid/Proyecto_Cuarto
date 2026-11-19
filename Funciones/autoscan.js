@@ -89,4 +89,4 @@ const analizar_prenda = async (req, res) => {
   }
 };
 
-export { analizar_prenda };
+export { analizar_prenda, url_valida };

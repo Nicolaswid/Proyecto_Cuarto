@@ -83,7 +83,7 @@ const listar_productos = async (req, res) => {
           const resultado = await pool.query(
             `SELECT p.id, p.titulo, p.descripcion, p.precio::float AS precio, p.talle, p.color,
             p.marca, p.tipo_prenda, p.subtipo_prenda, p.genero, p.stock,
-            p.estado_condicion, p.foto, p.visualizaciones,
+            p.estado_condicion, p.foto, p.fotos, p.visualizaciones,
             p.cantidad_guardados, p.fecha_publicacion,
             p.usuario_publicador_id,
             u.nombre_usuario AS vendedor_nombre_usuario,

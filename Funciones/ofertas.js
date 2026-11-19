@@ -1,17 +1,15 @@
 import pool from '../db.js';
 import { crear_notificacion } from './notificaciones.js';
+import { url_valida } from './autoscan.js';
 
 // ---------- Ayudantes internos (no son rutas) ----------
 
-// Cancela la transacción y responde con un error. Se usa para los cortes
-// "esperados" (404, 400...) que ocurren cuando ya hicimos BEGIN.
 const cortar = async (client, res, status, mensaje) => {
   await client.query('ROLLBACK');
   return res.status(status).json({ error: mensaje });
 };
 
-// Descuenta 1 unidad del producto. Si era la última, lo marca 'vendido'.
-// Devuelve true si el producto quedó agotado.
+// Descuenta 1 unidad. Si era la última, marca 'vendido'. Devuelve true si se agotó.
 const descontar_stock = async (client, producto_id) => {
   const resultado = await client.query(
     `UPDATE producto
@@ -24,9 +22,8 @@ const descontar_stock = async (client, producto_id) => {
   return resultado.rows[0].estado_publicacion === 'vendido';
 };
 
-// Rechaza todas las ofertas 'pendiente' de un producto (menos la indicada)
-// y devuelve un Set con los ids de usuarios a los que hay que avisar.
-// Un Set es una lista que no permite repetidos.
+// Rechaza las ofertas 'pendiente' de un producto (menos la indicada)
+// y devuelve un Set con los ids de usuarios a avisar.
 const cerrar_ofertas_pendientes = async (client, producto_id, excluir_id, vendedor_id) => {
   const resultado = await client.query(
     `UPDATE contra_ofertas
@@ -40,12 +37,21 @@ const cerrar_ofertas_pendientes = async (client, producto_id, excluir_id, vended
 
   const destinatarios = new Set();
   for (const fila of resultado.rows) {
-    // Si la oferta cerrada era del vendedor, hay que avisarle al comprador
-    // a quien le había contraofertado (autor de la oferta anterior).
     const destinatario = fila.usuario_id === vendedor_id ? fila.autor_anterior : fila.usuario_id;
     if (destinatario) destinatarios.add(destinatario);
   }
   return destinatarios;
+};
+
+// ¿Quién es el comprador de la negociación? Si la oferta es del comprador, él mismo.
+// Si es del vendedor (contraoferta), es el autor de la oferta a la que respondió.
+const buscar_comprador = async (client, oferta, vendedor_id) => {
+  if (oferta.usuario_id !== vendedor_id) return oferta.usuario_id;
+  const padre = await client.query(
+    `SELECT usuario_id FROM contra_ofertas WHERE id = $1`,
+    [oferta.responde_a]
+  );
+  return padre.rows[0].usuario_id;
 };
 
 // ---------- POST /contraofertas : el comprador hace una oferta inicial ----------
@@ -57,7 +63,6 @@ const crear_contraoferta = async (req, res) => {
     return res.status(400).json({ error: 'Faltan datos obligatorios o son inválidos' });
   }
 
-  // El comentario es opcional: si viene vacío o no es texto, guardamos null
   const comentario_limpio =
     typeof comentario === 'string' && comentario.trim() !== '' ? comentario.trim() : null;
 
@@ -81,7 +86,6 @@ const crear_contraoferta = async (req, res) => {
       return res.status(400).json({ error: 'La publicación ya no está disponible' });
     }
 
-    // Evitar que el mismo comprador llene al vendedor de ofertas
     const repetida = await pool.query(
       `SELECT id FROM contra_ofertas
        WHERE producto_id = $1 AND usuario_id = $2 AND estado = 'pendiente'`,
@@ -98,7 +102,6 @@ const crear_contraoferta = async (req, res) => {
       [req.usuario.id, producto_id, Number(nuevo_precio), comentario_limpio]
     );
 
-    // Ojo: "$${...}" es un signo $ literal seguido de una variable ${...}
     await crear_notificacion(
       usuario_publicador_id,
       `${req.usuario.nombre_usuario} te ofertó $${Number(nuevo_precio)} por "${titulo}"`,
@@ -131,12 +134,11 @@ const responder_contraoferta = async (req, res) => {
   const comentario_limpio =
     typeof comentario === 'string' && comentario.trim() !== '' ? comentario.trim() : null;
 
-  let client; // declarado afuera para poder usarlo en catch y finally
+  let client;
   try {
     client = await pool.connect();
     await client.query('BEGIN');
 
-    // 1) Lectura simple, solo para saber a qué producto pertenece la oferta
     const previa = await client.query(
       `SELECT producto_id FROM contra_ofertas WHERE id = $1`,
       [id]
@@ -145,7 +147,7 @@ const responder_contraoferta = async (req, res) => {
       return await cortar(client, res, 404, 'Oferta no encontrada');
     }
 
-    // 2) Candado sobre el PRODUCTO (siempre primero el producto, después la oferta)
+    // Candado: siempre primero el producto, después la oferta
     const prodRes = await client.query(
       `SELECT id, titulo, estado_publicacion, usuario_publicador_id
        FROM producto WHERE id = $1 FOR UPDATE`,
@@ -153,7 +155,6 @@ const responder_contraoferta = async (req, res) => {
     );
     const producto = prodRes.rows[0];
 
-    // 3) Candado sobre la OFERTA, ya leyendo su estado actualizado
     const ofertaRes = await client.query(
       `SELECT id, usuario_id, producto_id, nuevo_precio, responde_a, estado
        FROM contra_ofertas WHERE id = $1 FOR UPDATE`,
@@ -161,24 +162,11 @@ const responder_contraoferta = async (req, res) => {
     );
     const oferta = ofertaRes.rows[0];
 
-    // 4) ¿Quién es el comprador de esta negociación?
     const vendedor_id = producto.usuario_publicador_id;
-    let comprador_id;
-    if (oferta.usuario_id !== vendedor_id) {
-      comprador_id = oferta.usuario_id; // la hizo el comprador
-    } else {
-      // la hizo el vendedor: el comprador es el autor de la oferta a la que respondió
-      const padre = await client.query(
-        `SELECT usuario_id FROM contra_ofertas WHERE id = $1`,
-        [oferta.responde_a]
-      );
-      comprador_id = padre.rows[0].usuario_id;
-    }
+    const comprador_id = await buscar_comprador(client, oferta, vendedor_id);
 
-    // 5) Validaciones de permisos y estado
     const soy_parte = req.usuario.id === vendedor_id || req.usuario.id === comprador_id;
     if (!soy_parte) {
-      // Existe pero no es tuya: 404 para no revelar que existe
       return await cortar(client, res, 404, 'Oferta no encontrada');
     }
     if (req.usuario.id === oferta.usuario_id) {
@@ -191,57 +179,33 @@ const responder_contraoferta = async (req, res) => {
       return await cortar(client, res, 400, 'La publicación ya no está disponible');
     }
 
-    // 6) Ejecutar la acción. Las notificaciones se juntan en una lista
-    //    y se mandan recién después del COMMIT.
     const nombre = req.usuario.nombre_usuario;
-    const notificaciones = []; // cada elemento: [usuario_id, texto, link]
+    const notificaciones = [];
     let respuesta;
 
     if (accion === 'aceptar') {
-      
-      const quedo_vendido = await descontar_stock(client, producto.id);
-
+      // YA NO se crea la orden ni se descuenta stock: eso pasa cuando el comprador paga.
       await client.query(
-        `UPDATE producto SET estado_publicacion = 'vendido' WHERE id = $1`,
-        [producto.id]
+        `UPDATE contra_ofertas SET estado = 'aceptada' WHERE id = $1`,
+        [oferta.id]
       );
-      const orden = await client.query(
-        `INSERT INTO ordenes_de_compra (producto_id, comprador_id, vendedor_id, precio_final)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, producto_id, comprador_id, vendedor_id, precio_final, estado, fecha`,
-        [producto.id, comprador_id, vendedor_id, oferta.nuevo_precio]
-      );
-        
-      // Solo si se agotó el stock se cierran las demás ofertas pendientes
-        const cerradas = quedo_vendido
-        ? await cerrar_ofertas_pendientes(client, producto.id, oferta.id, vendedor_id)
-        : new Set();
 
-        // Al comprador siempre se le avisa que su orden se confirmó
+      if (req.usuario.id === vendedor_id) {
+        // El vendedor aceptó la oferta del comprador
         notificaciones.push([
-            comprador_id,
-            `Tu orden de compra de "${producto.titulo}" fue confirmada`,
-            '/mis_ordenes'
-          ]);
-          // Si la oferta aceptada era del vendedor (una contraoferta), a él también hay que avisarle
-          if (oferta.usuario_id !== comprador_id) {
-            notificaciones.push([
-            oferta.usuario_id,
-            `${nombre} aceptó tu contraoferta por "${producto.titulo}". Se generó la orden de compra`,
-            '/mis_ordenes'
-          ]);
-          }
-      // A los demás con ofertas abiertas les avisamos que se vendió (sin repetir a las partes)
-      cerradas.delete(comprador_id);
-      cerradas.delete(vendedor_id);
-      for (const uid of cerradas) {
+          comprador_id,
+          `${nombre} aceptó tu oferta por "${producto.titulo}". Ya podés pagar subiendo el comprobante`,
+          '/mis_contraofertas'
+        ]);
+      } else {
+        // El comprador aceptó la contraoferta del vendedor
         notificaciones.push([
-          uid,
-          `Tu oferta por "${producto.titulo}" se cerró porque el producto se vendió`,
+          vendedor_id,
+          `${nombre} aceptó tu contraoferta por "${producto.titulo}". Falta que suba el comprobante de pago`,
           '/mis_contraofertas'
         ]);
       }
-      respuesta = { mensaje: 'Oferta aceptada', orden: orden.rows[0] };
+      respuesta = { mensaje: 'Oferta aceptada. La compra se confirma cuando el comprador suba el comprobante' };
 
     } else if (accion === 'rechazar') {
       await client.query(
@@ -256,7 +220,6 @@ const responder_contraoferta = async (req, res) => {
       respuesta = { mensaje: 'Oferta rechazada' };
 
     } else {
-      // contraofertar: la anterior pasa a 'contraofertada' y se crea una fila nueva
       await client.query(
         `UPDATE contra_ofertas SET estado = 'contraofertada' WHERE id = $1`,
         [oferta.id]
@@ -275,7 +238,6 @@ const responder_contraoferta = async (req, res) => {
       respuesta = { mensaje: 'Contraoferta enviada', contraoferta: nueva.rows[0] };
     }
 
-    // 7) Confirmar TODO junto y recién ahora avisar
     await client.query('COMMIT');
 
     for (const [usuario_id, texto, link] of notificaciones) {
@@ -284,26 +246,139 @@ const responder_contraoferta = async (req, res) => {
 
     res.status(200).json(respuesta);
   } catch (error) {
-    // Si algo explotó a mitad de camino, deshacemos todo.
-    // El .catch(() => {}) evita que un fallo del ROLLBACK tape el error original.
     if (client) await client.query('ROLLBACK').catch(() => {});
     console.error(error);
     res.status(500).json({ error: 'Error al responder la oferta' });
   } finally {
-    if (client) client.release(); // SIEMPRE devolver la conexión
+    if (client) client.release();
+  }
+};
+
+// ---------- POST /contraofertas/:id/pagar : el comprador paga una oferta ACEPTADA ----------
+const pagar_contraoferta = async (req, res) => {
+  const { id } = req.params;
+  const { comprobante_url } = req.body;
+
+  if (!Number.isInteger(Number(id))) {
+    return res.status(400).json({ error: 'Id inválido' });
+  }
+  if (!url_valida(comprobante_url)) {
+    return res.status(400).json({ error: 'El comprobante debe ser una URL https válida' });
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const previa = await client.query(
+      `SELECT producto_id FROM contra_ofertas WHERE id = $1`,
+      [id]
+    );
+    if (previa.rows.length === 0) {
+      return await cortar(client, res, 404, 'Oferta no encontrada');
+    }
+
+    // Mismo orden de candados que en responder: primero producto, después oferta
+    const prodRes = await client.query(
+      `SELECT id, titulo, estado_publicacion, usuario_publicador_id, alias
+       FROM producto WHERE id = $1 FOR UPDATE`,
+      [previa.rows[0].producto_id]
+    );
+    const producto = prodRes.rows[0];
+
+    const ofertaRes = await client.query(
+      `SELECT id, usuario_id, producto_id, nuevo_precio, responde_a, estado
+       FROM contra_ofertas WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    const oferta = ofertaRes.rows[0];
+
+    const vendedor_id = producto.usuario_publicador_id;
+    const comprador_id = await buscar_comprador(client, oferta, vendedor_id);
+
+    // Vendedor: es parte pero con el rol equivocado -> 403. Ajeno -> 404.
+    if (req.usuario.id === vendedor_id) {
+      return await cortar(client, res, 403, 'El vendedor no puede pagar su propia oferta');
+    }
+    if (req.usuario.id !== comprador_id) {
+      return await cortar(client, res, 404, 'Oferta no encontrada');
+    }
+    if (oferta.estado !== 'aceptada') {
+      return await cortar(client, res, 400, 'Solo se puede pagar una oferta aceptada');
+    }
+    if (producto.estado_publicacion !== 'disponible') {
+      return await cortar(client, res, 400, 'La publicación ya no está disponible');
+    }
+    if (!producto.alias) {
+      return await cortar(client, res, 400, 'El vendedor todavía no cargó un alias: no se puede comprar');
+    }
+
+    const orden = await client.query(
+      `INSERT INTO ordenes_de_compra (producto_id, comprador_id, vendedor_id, precio_final, comprobante_pago)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, producto_id, comprador_id, vendedor_id, precio_final, estado, fecha,
+                 comprobante_pago AS comprobante_url`,
+      [producto.id, comprador_id, vendedor_id, oferta.nuevo_precio, comprobante_url]
+    );
+
+    // Sellamos la oferta: ya se pagó, no se puede pagar de nuevo
+    await client.query(
+      `UPDATE contra_ofertas SET estado = 'pagada' WHERE id = $1`,
+      [oferta.id]
+    );
+
+    const quedo_vendido = await descontar_stock(client, producto.id);
+    const cerradas = quedo_vendido
+      ? await cerrar_ofertas_pendientes(client, producto.id, oferta.id, vendedor_id)
+      : new Set();
+
+    await client.query('COMMIT');
+
+    // Notificaciones DESPUÉS del COMMIT
+    await crear_notificacion(
+      vendedor_id,
+      `${req.usuario.nombre_usuario} pagó "${producto.titulo}" por $${Number(oferta.nuevo_precio)}. Revisá el comprobante`,
+      '/mis_ordenes'
+    );
+    await crear_notificacion(
+      comprador_id,
+      `Tu orden de compra de "${producto.titulo}" fue confirmada`,
+      '/mis_ordenes'
+    );
+    cerradas.delete(comprador_id);
+    cerradas.delete(vendedor_id);
+    for (const uid of cerradas) {
+      await crear_notificacion(
+        uid,
+        `Tu oferta por "${producto.titulo}" se cerró porque el producto se vendió`,
+        '/mis_contraofertas'
+      );
+    }
+
+    res.status(201).json({ mensaje: 'Pago registrado, orden confirmada', orden: orden.rows[0] });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    console.error(error);
+    res.status(500).json({ error: 'Error al registrar el pago' });
+  } finally {
+    if (client) client.release();
   }
 };
 
 // ---------- GET /mis_contraofertas : las que hice y las que me tocan ----------
 const mis_contraofertas = async (req, res) => {
   try {
-    // "padre" es la oferta a la que respondió cada fila (sirve para encontrar
-    // al comprador cuando la fila es una contraoferta del vendedor)
     const resultado = await pool.query(
       `SELECT c.id, c.producto_id, p.titulo, c.nuevo_precio, c.responde_a,
               c.comentario, c.estado, c.usuario_id AS autor_id,
               u.nombre_usuario AS autor_nombre_usuario,
-              (c.estado = 'pendiente' AND c.usuario_id <> $1) AS me_toca_responder
+              (c.estado = 'pendiente' AND c.usuario_id <> $1) AS me_toca_responder,
+              (c.estado = 'aceptada'
+               AND p.estado_publicacion = 'disponible'
+               AND CASE WHEN c.usuario_id <> p.usuario_publicador_id
+                        THEN c.usuario_id ELSE padre.usuario_id END = $1
+              ) AS me_toca_pagar
        FROM contra_ofertas c
        JOIN producto p ON p.id = c.producto_id
        JOIN usuario u ON u.id = c.usuario_id
@@ -321,12 +396,15 @@ const mis_contraofertas = async (req, res) => {
   }
 };
 
-// ---------- POST /comprar_ahora : compra al precio publicado ----------
+// ---------- POST /comprar_ahora : compra al precio publicado, con comprobante ----------
 const comprar_ahora = async (req, res) => {
-  const { producto_id } = req.body;
+  const { producto_id, comprobante_url } = req.body;
 
   if (!producto_id || !Number.isInteger(Number(producto_id))) {
     return res.status(400).json({ error: 'Falta el producto_id o es inválido' });
+  }
+  if (!url_valida(comprobante_url)) {
+    return res.status(400).json({ error: 'El comprobante debe ser una URL https válida' });
   }
 
   let client;
@@ -334,9 +412,8 @@ const comprar_ahora = async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
 
-    // Candado sobre el producto: dos compras simultáneas no pueden pasar a la vez
     const prodRes = await client.query(
-      `SELECT id, titulo, precio, estado_publicacion, usuario_publicador_id
+      `SELECT id, titulo, precio, alias, estado_publicacion, usuario_publicador_id
        FROM producto WHERE id = $1 FOR UPDATE`,
       [producto_id]
     );
@@ -353,14 +430,18 @@ const comprar_ahora = async (req, res) => {
     if (producto.estado_publicacion !== 'disponible') {
       return await cortar(client, res, 400, 'La publicación ya no está disponible');
     }
+    if (!producto.alias) {
+      return await cortar(client, res, 400, 'El vendedor todavía no cargó un alias: no se puede comprar');
+    }
 
     const orden = await client.query(
-      `INSERT INTO ordenes_de_compra (producto_id, comprador_id, vendedor_id, precio_final)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, producto_id, comprador_id, vendedor_id, precio_final, estado, fecha`,
-      [producto.id, req.usuario.id, vendedor_id, producto.precio]
+      `INSERT INTO ordenes_de_compra (producto_id, comprador_id, vendedor_id, precio_final, comprobante_pago)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, producto_id, comprador_id, vendedor_id, precio_final, estado, fecha,
+                 comprobante_pago AS comprobante_url`,
+      [producto.id, req.usuario.id, vendedor_id, producto.precio, comprobante_url]
     );
-    
+
     const quedo_vendido = await descontar_stock(client, producto.id);
     // excluir_id = 0: no existe ninguna oferta con id 0, así que se cierran todas
     const cerradas = quedo_vendido
@@ -371,7 +452,7 @@ const comprar_ahora = async (req, res) => {
 
     await crear_notificacion(
       vendedor_id,
-      `${req.usuario.nombre_usuario} compró "${producto.titulo}" por $${producto.precio}`,
+      `${req.usuario.nombre_usuario} compró "${producto.titulo}" por $${Number(producto.precio)}. Revisá el comprobante`,
       '/mis_ordenes'
     );
     await crear_notificacion(
@@ -379,7 +460,7 @@ const comprar_ahora = async (req, res) => {
       `Tu orden de compra de "${producto.titulo}" fue confirmada`,
       '/mis_ordenes'
     );
-    cerradas.delete(req.usuario.id); // el comprador ya sabe que compró
+    cerradas.delete(req.usuario.id);
     cerradas.delete(vendedor_id);
     for (const uid of cerradas) {
       await crear_notificacion(
@@ -399,4 +480,4 @@ const comprar_ahora = async (req, res) => {
   }
 };
 
-export { crear_contraoferta, responder_contraoferta, mis_contraofertas, comprar_ahora };
+export { crear_contraoferta, responder_contraoferta, pagar_contraoferta, mis_contraofertas, comprar_ahora };

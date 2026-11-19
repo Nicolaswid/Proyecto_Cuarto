@@ -1,11 +1,28 @@
 import pool from '../db.js';
+import { url_valida } from './autoscan.js';
+
+// Columnas que devolvemos (una sola lista para no repetirla en cada consulta)
+const COLUMNAS = `id, talle, color, estado_condicion, precio::float AS precio, titulo, descripcion,
+  visualizaciones, foto, foto_etiqueta, fotos, marca, tipo_prenda, subtipo_prenda, genero, stock,
+  alias, estado_publicacion, fecha_publicacion, usuario_publicador_id, cantidad_guardados`;
+
+// Alias bancario: de 6 a 50 caracteres; solo letras, números, punto o guion
+const ALIAS_VALIDO = /^[A-Za-z0-9.-]{6,50}$/;
+const MAX_FOTOS_EXTRA = 4;
+
+// Devuelve un texto de error si "fotos" está mal, o null si está bien
+const validar_fotos = (fotos) => {
+  if (!Array.isArray(fotos)) return 'fotos debe ser una lista de URLs';
+  if (fotos.length > MAX_FOTOS_EXTRA) return `Podés subir hasta ${MAX_FOTOS_EXTRA} fotos extra`;
+  if (!fotos.every((f) => url_valida(f))) return 'Todas las fotos deben ser URLs https válidas';
+  return null;
+};
 
 // ---------- POST /crear_publicacion ----------
 const crear_publicacion = async (req, res) => {
-  // usuario_publicador_id YA NO viene del body: sale del token
   const {
     talle, color, estado_condicion, precio, titulo, descripcion, foto, marca,
-    tipo_prenda, subtipo_prenda, genero, stock
+    tipo_prenda, subtipo_prenda, genero, stock, foto_etiqueta, fotos, alias
   } = req.body;
 
   if (!talle || !color || !estado_condicion || !precio || !titulo || !descripcion ||
@@ -16,20 +33,36 @@ const crear_publicacion = async (req, res) => {
     return res.status(400).json({ error: 'El precio debe ser un número mayor a 0' });
   }
 
-  // Opcionales: si no vienen o están vacíos, se guarda null
+  const alias_limpio = typeof alias === 'string' ? alias.trim() : '';
+  if (!ALIAS_VALIDO.test(alias_limpio)) {
+    return res.status(400).json({ error: 'El alias es obligatorio: de 6 a 50 caracteres (letras, números, punto o guion)' });
+  }
+
+  // Fotos
+  if (!url_valida(foto)) {
+    return res.status(400).json({ error: 'La foto principal debe ser una URL https válida' });
+  }
+  const etiqueta_limpia =
+    typeof foto_etiqueta === 'string' && foto_etiqueta.trim() !== '' ? foto_etiqueta.trim() : null;
+  if (etiqueta_limpia && !url_valida(etiqueta_limpia)) {
+    return res.status(400).json({ error: 'foto_etiqueta debe ser una URL https válida' });
+  }
+  const fotos_finales = fotos === undefined || fotos === null ? [] : fotos;
+  const error_fotos = validar_fotos(fotos_finales);
+  if (error_fotos) return res.status(400).json({ error: error_fotos });
+
+  // Opcionales
   const tipo_limpio = tipo_prenda.trim();
   const subtipo_limpio =
     typeof subtipo_prenda === 'string' && subtipo_prenda.trim() !== '' ? subtipo_prenda.trim() : null;
   const genero_limpio =
     typeof genero === 'string' && genero.trim() !== '' ? genero.trim() : null;
 
-  // Largos máximos de las columnas VARCHAR (si no, la base falla con un 500)
   if (tipo_limpio.length > 50 || (subtipo_limpio && subtipo_limpio.length > 50) ||
       (genero_limpio && genero_limpio.length > 30)) {
     return res.status(400).json({ error: 'tipo_prenda y subtipo_prenda admiten hasta 50 caracteres, y genero hasta 30' });
   }
 
-  // stock opcional: si no viene, vale 1
   const stock_final = stock === undefined || stock === null ? 1 : Number(stock);
   if (!Number.isInteger(stock_final) || stock_final < 1) {
     return res.status(400).json({ error: 'El stock debe ser un número entero de 1 o más' });
@@ -38,13 +71,13 @@ const crear_publicacion = async (req, res) => {
   try {
     const resultado = await pool.query(
       `INSERT INTO producto (talle, color, estado_condicion, precio, titulo, descripcion, foto, marca,
-                             tipo_prenda, subtipo_prenda, genero, stock, usuario_publicador_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING id, talle, color, estado_condicion, precio::float AS precio, titulo, descripcion,
-                 visualizaciones, foto, marca, tipo_prenda, subtipo_prenda, genero, stock,
-                 estado_publicacion, fecha_publicacion, usuario_publicador_id, cantidad_guardados`,
+                             tipo_prenda, subtipo_prenda, genero, stock, foto_etiqueta, fotos, alias,
+                             usuario_publicador_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+       RETURNING ${COLUMNAS}`,
       [talle, color, estado_condicion, Number(precio), titulo, descripcion, foto, marca,
-       tipo_limpio, subtipo_limpio, genero_limpio, stock_final, req.usuario.id]
+       tipo_limpio, subtipo_limpio, genero_limpio, stock_final, etiqueta_limpia, fotos_finales,
+       alias_limpio, req.usuario.id]
     );
     res.status(201).json(resultado.rows[0]);
   } catch (error) {
@@ -53,7 +86,7 @@ const crear_publicacion = async (req, res) => {
   }
 };
 
-//  DELETE /eliminar_publicacion/:id (solo el dueño) 
+// ---------- DELETE /eliminar_publicacion/:id (solo el dueño) ----------
 const eliminar_publicacion = async (req, res) => {
   const { id } = req.params;
 
@@ -62,7 +95,6 @@ const eliminar_publicacion = async (req, res) => {
   }
 
   try {
-    // Filtra por id Y por dueño. Si es de otro, no encuentra nada: 404
     const resultado = await pool.query(
       `DELETE FROM producto WHERE id = $1 AND usuario_publicador_id = $2 RETURNING id`,
       [id, req.usuario.id]
@@ -72,7 +104,6 @@ const eliminar_publicacion = async (req, res) => {
     }
     res.status(200).json({ mensaje: 'Publicación eliminada' });
   } catch (error) {
-    // 23503 = foreign key (ON DELETE RESTRICT): tiene órdenes u ofertas asociadas
     if (error.code === '23503') {
       return res.status(400).json({ error: 'No se puede eliminar: la publicación tiene órdenes u ofertas asociadas' });
     }
@@ -81,7 +112,7 @@ const eliminar_publicacion = async (req, res) => {
   }
 };
 
-//  GET /publicaciones/:usuario_id (público, token opcional) 
+// ---------- GET /publicaciones/:usuario_id (token opcional) ----------
 const publicaciones = async (req, res) => {
   const { usuario_id } = req.params;
 
@@ -89,21 +120,25 @@ const publicaciones = async (req, res) => {
     return res.status(400).json({ error: 'Falta el id de usuario o no es válido' });
   }
 
-  // El dueño ve todas (incluidas las vendidas). Los demás, solo las disponibles.
   const soy_el_dueno = Boolean(req.usuario && req.usuario.id === Number(usuario_id));
 
   try {
     const resultado = await pool.query(
-      `SELECT id, talle, color, estado_condicion, precio::float AS precio, titulo, descripcion,
-              visualizaciones, foto, marca, tipo_prenda, subtipo_prenda, genero, stock,
-              estado_publicacion, fecha_publicacion, usuario_publicador_id, cantidad_guardados
+      `SELECT ${COLUMNAS}
        FROM producto
        WHERE usuario_publicador_id = $1
          AND ($2::boolean OR estado_publicacion = 'disponible')
        ORDER BY fecha_publicacion DESC, id DESC`,
       [usuario_id, soy_el_dueno]
     );
-    res.status(200).json(resultado.rows);
+
+    // El alias NO es público: solo lo ve el dueño
+    const filas = resultado.rows.map((fila) => {
+      if (!soy_el_dueno) delete fila.alias;
+      return fila;
+    });
+
+    res.status(200).json(filas);
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error al obtener las publicaciones del usuario' });
@@ -115,18 +150,19 @@ const editar_publicacion = async (req, res) => {
   const { id } = req.params;
   const {
     talle, color, estado_condicion, precio, titulo, descripcion, foto, marca,
-    tipo_prenda, subtipo_prenda, genero, stock
+    tipo_prenda, subtipo_prenda, genero, stock, foto_etiqueta, alias, fotos
   } = req.body;
 
   if (!Number.isInteger(Number(id))) {
     return res.status(400).json({ error: 'Falta el id de publicación o no es válido' });
   }
 
+  // "fotos" va aparte porque es una lista, no un texto
   const posibles = {
     talle, color, estado_condicion, precio, titulo, descripcion, foto, marca,
-    tipo_prenda, subtipo_prenda, genero, stock
+    tipo_prenda, subtipo_prenda, genero, stock, foto_etiqueta, alias
   };
-  const opcionales = ['subtipo_prenda', 'genero']; // estos se pueden dejar vacíos
+  const opcionales = ['subtipo_prenda', 'genero', 'foto_etiqueta']; // se pueden dejar vacíos
   const campos = [];
   const valores = [];
 
@@ -141,10 +177,26 @@ const editar_publicacion = async (req, res) => {
       if (!opcionales.includes(nombreCampo)) {
         return res.status(400).json({ error: `El campo ${nombreCampo} no puede estar vacío` });
       }
-      valor = null; // los opcionales se pueden borrar
+      valor = null;
     }
+
+    if ((nombreCampo === 'foto' || nombreCampo === 'foto_etiqueta') && valor !== null && !url_valida(valor)) {
+      return res.status(400).json({ error: `${nombreCampo} debe ser una URL https válida` });
+    }
+    if (nombreCampo === 'alias' && (typeof valor !== 'string' || !ALIAS_VALIDO.test(valor))) {
+      return res.status(400).json({ error: 'El alias debe tener de 6 a 50 caracteres (letras, números, punto o guion)' });
+    }
+
     campos.push(nombreCampo);
     valores.push(valor);
+  }
+
+  // Si mandan "fotos", REEMPLAZA la lista entera (con [] se vacía)
+  if (fotos !== undefined) {
+    const error_fotos = validar_fotos(fotos);
+    if (error_fotos) return res.status(400).json({ error: error_fotos });
+    campos.push('fotos');
+    valores.push(fotos);
   }
 
   if (campos.length === 0) {
@@ -163,11 +215,8 @@ const editar_publicacion = async (req, res) => {
   }
 
   const set = campos.map((campo, i) => `${campo} = $${i + 1}`).join(', ');
-
-  // Si cambian el stock, la publicación vuelve a estar disponible (texto fijo, no viene del usuario)
   const reactivar = stock !== undefined ? ", estado_publicacion = 'disponible'" : '';
 
-  // Al final van el id de la publicación y el id del dueño (sale del token)
   valores.push(id);
   valores.push(req.usuario.id);
 
@@ -175,9 +224,7 @@ const editar_publicacion = async (req, res) => {
     const resultado = await pool.query(
       `UPDATE producto SET ${set}${reactivar}, fecha_publicacion = NOW()
        WHERE id = $${valores.length - 1} AND usuario_publicador_id = $${valores.length}
-       RETURNING id, talle, color, estado_condicion, precio::float AS precio, titulo, descripcion,
-                 visualizaciones, foto, marca, tipo_prenda, subtipo_prenda, genero, stock,
-                 estado_publicacion, fecha_publicacion, usuario_publicador_id, cantidad_guardados`,
+       RETURNING ${COLUMNAS}`,
       valores
     );
     if (resultado.rows.length === 0) {
@@ -190,4 +237,49 @@ const editar_publicacion = async (req, res) => {
   }
 };
 
-export { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion };
+// ---------- GET /productos/:id/datos_pago (con token) ----------
+const datos_pago = async (req, res) => {
+  const { id } = req.params;
+
+  if (!Number.isInteger(Number(id))) {
+    return res.status(400).json({ error: 'Id inválido' });
+  }
+
+  try {
+    const resultado = await pool.query(
+      `SELECT p.id, p.titulo, p.precio::float AS precio, p.alias, p.estado_publicacion,
+              p.usuario_publicador_id, u.nombre_usuario AS vendedor_nombre_usuario
+       FROM producto p
+       JOIN usuario u ON u.id = p.usuario_publicador_id
+       WHERE p.id = $1`,
+      [id]
+    );
+    if (resultado.rows.length === 0) {
+      return res.status(404).json({ error: 'Publicación no encontrada' });
+    }
+
+    const p = resultado.rows[0];
+    if (p.usuario_publicador_id === req.usuario.id) {
+      return res.status(400).json({ error: 'Es tu propia publicación' });
+    }
+    if (p.estado_publicacion !== 'disponible') {
+      return res.status(400).json({ error: 'La publicación ya no está disponible' });
+    }
+    if (!p.alias) {
+      return res.status(400).json({ error: 'El vendedor todavía no cargó un alias: no se puede comprar' });
+    }
+
+    res.status(200).json({
+      producto_id: p.id,
+      titulo: p.titulo,
+      precio: p.precio,
+      alias: p.alias,
+      vendedor_nombre_usuario: p.vendedor_nombre_usuario
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al obtener los datos de pago' });
+  }
+};
+
+export { crear_publicacion, eliminar_publicacion, publicaciones, editar_publicacion, datos_pago };

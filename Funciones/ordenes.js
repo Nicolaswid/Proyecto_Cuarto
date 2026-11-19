@@ -12,7 +12,7 @@ const mis_ordenes = async (req, res) => {
     // dos veces, por eso lleva dos apodos). Nunca devolvemos email ni contrasena.
     const resultado = await pool.query(
       `SELECT o.id, o.producto_id, p.titulo, p.foto, o.precio_final, o.estado, o.fecha,
-              o.comprador_id, uc.nombre_usuario AS comprador_nombre_usuario,
+              o.comprobante_pago AS comprobante_ur, o.comprador_id, uc.nombre_usuario AS comprador_nombre_usuario,
               o.vendedor_id, uv.nombre_usuario AS vendedor_nombre_usuario,
               CASE WHEN o.comprador_id = $1 THEN 'comprador' ELSE 'vendedor' END AS mi_rol
        FROM ordenes_de_compra o
